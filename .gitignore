@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.log
+*.tgz
+backup/
+out/
+dpo/
+checkpoints/
+# scratch / debugging helpers
+ops/diag.sh
+ops/args_check.py
+ops/env_check.py
+ops/llm_peek.py
+ops/llm_chain2.py
+ops/logtail.py

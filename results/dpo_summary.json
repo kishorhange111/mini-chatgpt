@@ -1,0 +1,15 @@
+{
+  "train_pairs": 12000,
+  "steps": 375,
+  "beta": 0.1,
+  "lr": 1e-06,
+  "eval_before": {
+    "reward_accuracy": 0.524,
+    "reward_margin": 0.005581496076658368
+  },
+  "eval_after": {
+    "reward_accuracy": 0.682,
+    "reward_margin": 0.7572643041908741
+  },
+  "wall_clock_hours": 0.37
+}

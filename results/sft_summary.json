@@ -1,0 +1,10 @@
+{
+  "model": "Qwen/Qwen2.5-0.5B",
+  "dataset": "HuggingFaceTB/smoltalk/all",
+  "examples": 159407,
+  "train_tokens": 126812015,
+  "steps": 4982,
+  "final_train_loss": 0.15017678416048078,
+  "wall_clock_hours": 0.55,
+  "gpu": "NVIDIA A100-SXM4-40GB"
+}
