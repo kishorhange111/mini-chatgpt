@@ -30,4 +30,5 @@ samples:
 	python samples.py
 
 clean:
-	rm -rf .pytest_cache .ruff_cache **/__pycache__ *.egg-info
+	rm -rf .pytest_cache .ruff_cache *.egg-info
+	find . -name __pycache__ -type d -prune -exec rm -rf {} +
