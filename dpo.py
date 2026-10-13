@@ -36,16 +36,19 @@ Data: UltraFeedback (binarized) - ~60k prompts, each with a GPT-4-rated
       chosen and rejected answer.
 """
 import json
-import math
 import os
 import random
 import time
 
 import torch
-import torch.nn.functional as F
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, get_cosine_schedule_with_warmup
 
+from mini_chatgpt import dpo_core
+
+# ---------------------------------------------------------------------------
+# Configuration (override with environment variables)
+# ---------------------------------------------------------------------------
 SFT_PATH = os.environ.get("SFT_PATH", "/content/out/final")
 OUT = os.environ.get("DPO_OUT", "/content/dpo")
 N_TRAIN = int(os.environ.get("N_TRAIN", "12000"))       # preference pairs to train on
@@ -54,92 +57,87 @@ BETA = float(os.environ.get("BETA", "0.1"))
 LR = float(os.environ.get("LR", "1e-6"))                  # DPO needs a MUCH smaller LR than SFT
 MICRO_BATCH = int(os.environ.get("MICRO_BATCH", "4"))     # pairs per forward pass
 GRAD_ACCUM = int(os.environ.get("GRAD_ACCUM", "8"))       # effective batch = 32 pairs
-MAX_PROMPT, MAX_LEN = 512, 1024
+MAX_PROMPT, MAX_LEN = 512, 1024                           # token caps for the prompt and prompt + answer
 TIME_BUDGET_HOURS = float(os.environ.get("TIME_BUDGET_HOURS", "1.0"))
 SEED = 42
 
 torch.manual_seed(SEED)
 random.seed(SEED)
 device = "cuda"
+# The SFT output folder contains the tokenizer with the ChatML template attached.
 tok = AutoTokenizer.from_pretrained(SFT_PATH)
 END = tok.convert_tokens_to_ids("<|im_end|>")
 
 
 # ---------------------------------------------------------------------------
-# Data
+# Data and loss (logic in mini_chatgpt/dpo_core.py, unit-tested there; these
+# wrappers bind it to this run's tokenizer, device and hyper-parameters)
 # ---------------------------------------------------------------------------
 def encode_pair(ex):
-    """prompt / chosen / rejected -> token ids.
+    """prompt / chosen / rejected -> token ids (see dpo_core.encode_pair).
 
     The prompt is formatted with the same ChatML template used in SFT; only the
     answer tokens are scored (the prompt is identical for both answers anyway).
     """
-    prompt_msgs = ex["chosen"][:-1]
-    prompt = tok.apply_chat_template(prompt_msgs, add_generation_prompt=True, tokenize=False)
-    p_ids = tok(prompt, add_special_tokens=False)["input_ids"][-MAX_PROMPT:]  # keep the END of long prompts
-    out = {"prompt": p_ids}
-    for key in ["chosen", "rejected"]:
-        ans = tok(ex[key][-1]["content"], add_special_tokens=False)["input_ids"] + [END]
-        out[key] = ans[:MAX_LEN - len(p_ids)]
-    return out
+    return dpo_core.encode_pair(ex, tok, END, MAX_PROMPT, MAX_LEN)
 
 
 def collate(pairs):
-    """Stack chosen answers then rejected answers into ONE padded batch.
+    """Pad a micro-batch (chosen rows, then rejected rows) and move it to the GPU.
 
-    Returns input_ids, attention_mask and a loss_mask that is 1 only on answer tokens.
+    Returns:
+        (input_ids, attention_mask, loss_mask) on `device`.
     """
-    seqs, masks = [], []
-    for key in ["chosen", "rejected"]:
-        for p in pairs:
-            seqs.append(p["prompt"] + p[key])
-            masks.append([0] * len(p["prompt"]) + [1] * len(p[key]))
-    width = max(map(len, seqs))
-    ids = torch.full((len(seqs), width), tok.pad_token_id)
-    att = torch.zeros((len(seqs), width), dtype=torch.long)
-    lm = torch.zeros((len(seqs), width))
-    for i, (s, m) in enumerate(zip(seqs, masks)):
-        ids[i, :len(s)] = torch.tensor(s)
-        att[i, :len(s)] = 1
-        lm[i, :len(m)] = torch.tensor(m, dtype=torch.float)
+    ids, att, lm = dpo_core.collate_pairs(pairs, tok.pad_token_id)
     return ids.to(device), att.to(device), lm.to(device)
 
 
-def answer_logprob(model, ids, att, loss_mask):
-    """Sum of log-probabilities the model assigns to the answer tokens (log pi(y|x))."""
-    logits = model(input_ids=ids, attention_mask=att).logits[:, :-1].float()
-    targets = ids[:, 1:]
-    logp = torch.gather(F.log_softmax(logits, -1), 2, targets.unsqueeze(-1)).squeeze(-1)
-    return (logp * loss_mask[:, 1:]).sum(-1)
-
-
 def dpo_loss(policy, ref, batch):
-    ids, att, lm = batch
-    n = ids.shape[0] // 2
-    pi = answer_logprob(policy, ids, att, lm)
-    with torch.no_grad():                           # the reference model is frozen
-        pi_ref = answer_logprob(ref, ids, att, lm)
-    rewards = BETA * (pi - pi_ref)                  # implicit rewards
-    r_chosen, r_rejected = rewards[:n], rewards[n:]
-    loss = -F.logsigmoid(r_chosen - r_rejected).mean()
-    return loss, r_chosen.detach(), r_rejected.detach()
+    """DPO loss and implicit rewards for one collated batch (beta = BETA).
+
+    Returns:
+        (loss, r_chosen, r_rejected).
+    """
+    return dpo_core.dpo_loss(policy, ref, batch, BETA)
 
 
 @torch.no_grad()
 def evaluate(policy, ref, data):
-    policy.eval()
+    """Preference metrics on held-out pairs.
+
+    Args:
+        policy: the model being trained.
+        ref: the frozen SFT reference.
+        data: list of encoded pairs.
+
+    Returns:
+        {"reward_accuracy": fraction of pairs where r(chosen) > r(rejected),
+         "reward_margin": mean of r(chosen) - r(rejected)}.
+    """
+    policy.eval()  # no dropout while measuring
     acc, margin, count = 0.0, 0.0, 0
     for i in range(0, len(data), MICRO_BATCH):
         _, rc, rr = dpo_loss(policy, ref, collate(data[i:i + MICRO_BATCH]))
         acc += (rc > rr).float().sum().item()
         margin += (rc - rr).sum().item()
         count += len(rc)
-    policy.train()
+    policy.train()  # back to training mode for the caller
     return {"reward_accuracy": acc / count, "reward_margin": margin / count}
 
 
 @torch.no_grad()
 def generate(model, prompts):
+    """Greedy answers to a few fixed prompts, for a qualitative before/after comparison.
+
+    The model must be in eval mode with the KV cache on (see the note in main()).
+
+    Args:
+        model: a causal LM on `device`.
+        prompts: list of user messages.
+
+    Returns:
+        {prompt: answer text}.
+    """
     out = {}
     for p in prompts:
         # transformers v5: apply_chat_template(tokenize=True) returns a dict, so format text first, then tokenize.
@@ -152,7 +150,9 @@ def generate(model, prompts):
 
 
 def main():
+    """Run DPO end to end: load data and models, train, evaluate, save model + metrics to OUT."""
     start = time.time()
+    # 1) Data: sample train/eval preference pairs and tokenize them.
     raw = load_dataset("HuggingFaceH4/ultrafeedback_binarized")
     train = raw["train_prefs"].shuffle(seed=SEED).select(range(N_TRAIN))
     test = raw["test_prefs"].shuffle(seed=SEED).select(range(N_EVAL))
@@ -163,22 +163,27 @@ def main():
     test = [p for p in test if p["chosen"] and p["rejected"]]
     print(f"train pairs {len(train)}, eval pairs {len(test)}")
 
+    # 2) Models: the trainable policy (fp32 master weights, bf16 autocast below)
+    #    and a frozen bf16 reference copy - both start as the SFT model.
     policy = AutoModelForCausalLM.from_pretrained(SFT_PATH, dtype=torch.float32).to(device)
     policy.gradient_checkpointing_enable()
     policy.config.use_cache = False
     ref = AutoModelForCausalLM.from_pretrained(SFT_PATH, dtype=torch.bfloat16).to(device).eval()
     ref.requires_grad_(False)
 
+    # 3) Baselines before any DPO step: sample answers and preference metrics.
     prompts = ["Explain the difference between a list and a tuple in Python.",
                "Give me three tips for a job interview.",
                "What should I do if I feel stressed at work?"]
     before = generate(ref, prompts)
-    eval_before = evaluate(policy, ref, test)      # policy == ref here -> accuracy ~0 margin 0
+    # policy == ref here, so every reward is ~0: accuracy is ~chance and the margin ~0.
+    eval_before = evaluate(policy, ref, test)
     print("before:", eval_before)
 
+    # 4) Training loop: one optimizer step per GRAD_ACCUM micro-batches (one pass over the data).
     steps = len(train) // (MICRO_BATCH * GRAD_ACCUM)
     opt = torch.optim.AdamW(policy.parameters(), lr=LR, weight_decay=0.0)
-    sched = get_cosine_schedule_with_warmup(opt, int(0.1 * steps), steps)
+    sched = get_cosine_schedule_with_warmup(opt, int(0.1 * steps), steps)  # 10% warm-up, then cosine decay
     deadline = start + TIME_BUDGET_HOURS * 3600
     log = []
     random.shuffle(train)
@@ -188,6 +193,7 @@ def main():
             i = (step * GRAD_ACCUM + micro) * MICRO_BATCH
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 loss, rc, rr = dpo_loss(policy, ref, collate(train[i:i + MICRO_BATCH]))
+            # Divide so the accumulated gradient is the mean over the effective batch, not the sum.
             (loss / GRAD_ACCUM).backward()
             stats.append((loss.item(), (rc > rr).float().mean().item(), (rc - rr).mean().item()))
         torch.nn.utils.clip_grad_norm_(policy.parameters(), 1.0)
@@ -204,6 +210,7 @@ def main():
             print(f"[time budget] stopping at step {step + 1}")
             break
 
+    # 5) Evaluate, generate the "after" samples, save everything.
     eval_after = evaluate(policy, ref, test)
     print("after:", eval_after)
     # Generation needs eval mode, no gradient checkpointing and the KV cache ON. In training mode with
