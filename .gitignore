@@ -6,3 +6,7 @@ backup/
 out/
 dpo/
 checkpoints/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.venv/

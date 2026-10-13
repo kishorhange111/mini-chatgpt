@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mini-chatgpt"
+version = "1.0.0"
+description = "Turn a base LLM into a chat assistant: supervised fine-tuning, hand-written DPO and benchmark evaluation."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+keywords = ["llm", "sft", "dpo", "rlhf", "fine-tuning", "pytorch", "transformers"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+# Only what the importable package needs; the training scripts' stack is in requirements.txt.
+dependencies = ["torch>=2.4"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6", "jinja2>=3.1"]
+
+[project.urls]
+Repository = "https://github.com/kishorhange111/mini-chatgpt"
+
+[tool.setuptools.packages.find]
+include = ["mini_chatgpt*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+# pycodestyle errors/warnings, pyflakes, import sorting, pyupgrade, bugbear
+select = ["E", "W", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mini_chatgpt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
