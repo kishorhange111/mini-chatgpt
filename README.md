@@ -7,17 +7,22 @@
 **The ChatGPT recipe end to end on one GPU: a base model that can only continue text becomes an assistant through supervised fine-tuning, is aligned to human preferences with a hand-written DPO loss, and is measured on standard benchmarks against the model builder's own chat model.**
 
 ## Results
-| Benchmark | Base | **SFT (ours)** | **SFT + DPO (ours)** | Qwen2.5-0.5B-**Instruct** (Qwen's official chat model) |
-|---|---|---|---|---|
-| ARC-Easy | 58.4 | **64.5** | 64.3 | 59.2 |
-| ARC-Challenge | 32.3 | 33.5 | **33.8** | 33.2 |
-| IFEval — instruction-level strict | 22.7 | 36.5 | **36.7** | 36.3 |
-| IFEval — prompt-level strict | 12.6 | 23.5 | 24.0 | **26.4** |
-| HellaSwag | 52.2 | 51.6 | 52.0 | **52.4** |
-| Winogrande | 55.6 | 55.6 | 55.7 | 55.7 |
-| MMLU | **47.5** | 45.4 | 45.9 | 45.8 |
+| Benchmark | Base | **SFT (ours)** | **SFT + DPO (ours)** | Qwen2.5-0.5B-**Instruct** (Qwen's official chat model) | 95% CI (±pts) |
+|---|---|---|---|---|---|
+| ARC-Easy | 58.4 | **64.5** | 64.3 | 59.2 | ±1.9 |
+| ARC-Challenge | 32.3 | 33.5 | **33.8** | 33.2 | ±2.7 |
+| IFEval — instruction-level strict | 22.7 | 36.5 | **36.7** | 36.3 | ±3.3 |
+| IFEval — prompt-level strict | 12.6 | 23.5 | 24.0 | **26.4** | ±3.6 |
+| HellaSwag | 52.2 | 51.6 | 52.0 | **52.4** | ±1.0 |
+| Winogrande | 55.6 | 55.6 | 55.7 | 55.7 | ±2.7 |
+| MMLU | **47.5** | 45.4 | 45.9 | 45.8 | ±0.8 |
 
-**Headline:** a single ~3-hour SFT run on public data **matches Qwen's official instruct model on instruction-level IFEval (36.7 vs 36.3) and beats it on ARC-Easy (+5 pts)**, starting from the same base model; Qwen's model stays ahead on prompt-level IFEval (26.4 vs 24.0).
+**Headline:** a single ~3-hour SFT run on public data, starting from the same base model, **reaches Qwen's official instruct model on instruction-level IFEval (36.7 vs 36.3, a statistical tie)** and is ahead on ARC-Easy by 5 points of length-normalised accuracy. Qwen's model stays ahead on prompt-level IFEval (26.4 vs 24.0).
+
+How to read the table honestly:
+- The last column is the 95% interval for one score (binomial, ±1.96·√(p(1−p)/n) on each test set's size). Gaps smaller than it are noise; differences between two models on the same questions are a little tighter than this, but not by much.
+- ARC, HellaSwag numbers are **acc_norm** (log-likelihood divided by answer length, lm-eval's convention for these tasks). On plain **acc** the ARC-Easy gap shrinks to 66.6 vs 65.4 (+1.2), which is within noise; [`results/benchmarks.json`](results/benchmarks.json) has both. The +5 is real for acc_norm but partly reflects that SFT changed how the model spreads probability over long answers.
+- So the fair summary is: SFT got this model to roughly the level of Qwen's own instruct release on these benchmarks, with much less data, not clearly past it.
 
 - **Instruction following nearly doubles** (prompt-level 12.6 → 24.0 %, instruction-level 22.7 → 36.7 %) — the assistant behaviour SFT is designed to teach.
 - **MMLU drops ~2 pts after SFT** — the well-known *alignment tax*; Qwen's own instruct model shows a similar drop (47.5 → 45.8).

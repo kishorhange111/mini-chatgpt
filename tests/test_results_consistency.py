@@ -32,7 +32,7 @@ def table_row(label):
     for line in README.splitlines():
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
         if cells and cells[0] == label:
-            return [float(c.replace("*", "")) for c in cells[1:]]
+            return [float(c.replace("*", "")) for c in cells[1:5]]  # the 5th cell is the CI half-width
     raise AssertionError(f"row {label!r} not found in README")
 
 
