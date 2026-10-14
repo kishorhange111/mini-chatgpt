@@ -38,10 +38,18 @@ KEY IDEAS IMPLEMENTED BELOW
 
 All settings are environment variables, so the same script is used for a
 20-step smoke test and for the full run (see configs/*.env).
+
+The pure data logic (loss masking, length bucketing, padding, the chat
+template) lives in the mini_chatgpt/ package, where it is unit-tested on CPU.
+This file is the GPU-side orchestration: load, tokenize, train, save.
+
+Usage:
+    python train.py                               # defaults below
+    set -a; . configs/full.env; set +a; python train.py   # the full run
 """
+
 import json
 import os
-import random
 import time
 
 import torch
@@ -56,102 +64,67 @@ from transformers import (
 )
 from transformers.trainer_utils import get_last_checkpoint
 
+from mini_chatgpt.chat_format import CHAT_TEMPLATE
+from mini_chatgpt.sft_data import bucket_by_length, collate_sft, encode_conversation, has_target
+
 # ---------------------------------------------------------------------------
 # Configuration (override any of these with environment variables)
 # ---------------------------------------------------------------------------
-MODEL = os.environ.get("MODEL", "Qwen/Qwen2.5-0.5B")            # base model (NOT the instruct one)
-DATASET = os.environ.get("DATASET", "HuggingFaceTB/smoltalk")    # ~1M synthetic + curated chats
+MODEL = os.environ.get("MODEL", "Qwen/Qwen2.5-0.5B")  # base model (NOT the instruct one)
+DATASET = os.environ.get("DATASET", "HuggingFaceTB/smoltalk")  # ~1M synthetic + curated chats
 DATASET_CONFIG = os.environ.get("DATASET_CONFIG", "all")
-N_SAMPLES = int(os.environ.get("N_SAMPLES", "150000"))           # how many conversations to train on
-MAX_LEN = int(os.environ.get("MAX_LEN", "2048"))                 # truncate longer conversations (tokens)
-MAX_STEPS = int(os.environ.get("MAX_STEPS", "-1"))               # -1 = one full pass over the data
+N_SAMPLES = int(os.environ.get("N_SAMPLES", "150000"))  # how many conversations to train on
+MAX_LEN = int(os.environ.get("MAX_LEN", "2048"))  # truncate longer conversations (tokens)
+MAX_STEPS = int(os.environ.get("MAX_STEPS", "-1"))  # -1 = one full pass over the data
 TIME_BUDGET_HOURS = float(os.environ.get("TIME_BUDGET_HOURS", "3.0"))
-LR = float(os.environ.get("LR", "3e-5"))                         # small LR: we only nudge a trained model
-BATCH = int(os.environ.get("BATCH", "4"))                        # conversations per GPU step
-GRAD_ACCUM = int(os.environ.get("GRAD_ACCUM", "8"))              # effective batch = BATCH * GRAD_ACCUM = 32
+LR = float(os.environ.get("LR", "3e-5"))  # small LR: we only nudge a trained model
+BATCH = int(os.environ.get("BATCH", "4"))  # conversations per GPU step
+GRAD_ACCUM = int(os.environ.get("GRAD_ACCUM", "8"))  # effective batch = BATCH * GRAD_ACCUM = 32
 OUT = os.environ.get("OUT", "/content/out")
 SAVE_STEPS = int(os.environ.get("SAVE_STEPS", "300"))
 SEED = 42
 
-# ChatML template - the same format Qwen's official instruct models use.
-# It is saved with the tokenizer so `tokenizer.apply_chat_template` works later.
-CHAT_TEMPLATE = (
-    "{% for m in messages %}"
-    "{{ '<|im_start|>' + m['role'] + '\n' + m['content'] + '<|im_end|>\n' }}"
-    "{% endfor %}"
-    "{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}"
-)
-
+# The tokenizer is loaded at import time because `encode` and `collate` below
+# use it, and datasets.map(num_proc=...) ships those functions to worker
+# processes. The ChatML template (see mini_chatgpt/chat_format.py) is attached
+# here so it is saved with the tokenizer and `apply_chat_template` works later.
 tok = AutoTokenizer.from_pretrained(MODEL)
 tok.chat_template = CHAT_TEMPLATE
 if tok.pad_token is None:
+    # Some base models ship without a pad token; reusing EOS is safe because
+    # padded positions are masked out of both attention and the loss.
     tok.pad_token = tok.eos_token
 
 
 # ---------------------------------------------------------------------------
-# Data preparation
+# Data preparation (the logic lives in mini_chatgpt/sft_data.py, where it is
+# unit-tested; these thin wrappers bind it to this run's tokenizer/settings)
 # ---------------------------------------------------------------------------
 def encode(example):
-    """Turn one conversation into token ids + labels.
+    """Turn one dataset row into token ids + loss-masked labels.
 
-    We tokenize message by message so we know exactly which tokens belong to
-    the assistant. Only those get a real label; everything else gets -100,
+    Only assistant tokens get a real label; everything else gets -100,
     which PyTorch's cross-entropy loss ignores.
+
+    Args:
+        example: a SmolTalk row with a "messages" list of {"role", "content"}.
+
+    Returns:
+        {"input_ids", "labels", "length"} (see encode_conversation).
     """
-    input_ids, labels = [], []
-    for m in example["messages"]:
-        head = tok(f"<|im_start|>{m['role']}\n", add_special_tokens=False)["input_ids"]
-        body = tok(f"{m['content']}<|im_end|>\n", add_special_tokens=False)["input_ids"]
-        input_ids += head + body
-        if m["role"] == "assistant":
-            # Learn the reply AND the <|im_end|> token, so the model learns when to stop.
-            labels += [-100] * len(head) + body
-        else:
-            labels += [-100] * (len(head) + len(body))
-    input_ids, labels = input_ids[:MAX_LEN], labels[:MAX_LEN]
-    return {"input_ids": input_ids, "labels": labels, "length": len(input_ids)}
-
-
-def has_target(example):
-    """Drop conversations whose assistant part was cut off entirely by truncation."""
-    return any(l != -100 for l in example["labels"])
-
-
-def bucket_by_length(ds, batch_size, bucket_batches=64):
-    """Reorder the dataset so each batch holds conversations of similar length.
-
-    1. shuffle everything,
-    2. cut into big chunks (64 batches each) and sort each chunk by length,
-    3. split chunks into batches and shuffle the *batches*.
-    Result: little padding inside a batch, but still random training order.
-    """
-    rng = random.Random(SEED)
-    idx = list(range(len(ds)))
-    rng.shuffle(idx)
-    lengths = ds["length"]
-    chunk = batch_size * bucket_batches
-    batches = []
-    for i in range(0, len(idx), chunk):
-        part = sorted(idx[i:i + chunk], key=lambda j: lengths[j])
-        batches += [part[k:k + batch_size] for k in range(0, len(part), batch_size)]
-    rng.shuffle(batches)
-    return ds.select([j for b in batches for j in b])
+    return encode_conversation(example["messages"], tok, MAX_LEN)
 
 
 def collate(batch):
-    """Pad a list of examples to the longest one in the batch."""
-    width = max(len(b["input_ids"]) for b in batch)
-    ids, labels, mask = [], [], []
-    for b in batch:
-        pad = width - len(b["input_ids"])
-        ids.append(b["input_ids"] + [tok.pad_token_id] * pad)
-        labels.append(b["labels"] + [-100] * pad)                # padding never counts in the loss
-        mask.append([1] * len(b["input_ids"]) + [0] * pad)       # 0 = "don't attend to this position"
-    return {
-        "input_ids": torch.tensor(ids),
-        "labels": torch.tensor(labels),
-        "attention_mask": torch.tensor(mask),
-    }
+    """Pad a list of encoded examples to the longest one in the batch.
+
+    Args:
+        batch: list of dicts with "input_ids" and "labels".
+
+    Returns:
+        A dict of LongTensors the model's forward() accepts.
+    """
+    return collate_sft(batch, tok.pad_token_id)
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +138,7 @@ class OrderedTrainer(Trainer):
     """
 
     def _get_train_sampler(self, *args, **kwargs):
+        """Read the dataset front to back (it is already batch-shuffled)."""
         return SequentialSampler(self.train_dataset)
 
 
@@ -176,9 +150,15 @@ class TimeBudget(TrainerCallback):
     """
 
     def __init__(self, hours):
+        """Args: hours - wall-clock budget, counted from when the callback is created."""
         self.deadline = time.time() + hours * 3600
 
     def on_step_end(self, args, state, control, **kwargs):
+        """Called by Trainer after every optimizer step; flips the stop/save flags when over budget.
+
+        Returns:
+            The (possibly modified) TrainerControl object.
+        """
         if time.time() > self.deadline:
             print(f"[time budget] {TIME_BUDGET_HOURS}h reached at step {state.global_step}; stopping.")
             control.should_save = True
@@ -190,6 +170,7 @@ class TimeBudget(TrainerCallback):
 # Main
 # ---------------------------------------------------------------------------
 def main():
+    """Run SFT end to end and write the final model, summary.json and log_history.json to OUT."""
     start = time.time()
     print(f"GPU: {torch.cuda.get_device_name(0)}")
     print(f"model={MODEL} dataset={DATASET}/{DATASET_CONFIG} n={N_SAMPLES} max_len={MAX_LEN}")
@@ -201,7 +182,8 @@ def main():
     ds = ds.filter(has_target, num_proc=os.cpu_count())
     n_tokens = sum(ds["length"])
     print(f"examples={len(ds)} tokens={n_tokens:,}")
-    ds = bucket_by_length(ds, BATCH)
+    # Reorder so each batch holds conversations of similar length (less padding).
+    ds = ds.select(bucket_by_length(ds["length"], BATCH, seed=SEED))
 
     # 2) Load the base model. Weights stay in fp32; the forward/backward pass runs in bf16 (mixed precision).
     model = AutoModelForCausalLM.from_pretrained(MODEL, attn_implementation="sdpa")
@@ -216,18 +198,18 @@ def main():
         per_device_train_batch_size=BATCH,
         gradient_accumulation_steps=GRAD_ACCUM,
         learning_rate=LR,
-        lr_scheduler_type="cosine",      # LR warms up, then smoothly decays to 0
-        warmup_steps=0.03,               # first 3% of steps are warm-up (float = ratio in transformers v5)
+        lr_scheduler_type="cosine",  # LR warms up, then smoothly decays to 0
+        warmup_steps=0.03,  # first 3% of steps are warm-up (float = ratio in transformers v5)
         weight_decay=0.0,
-        max_grad_norm=1.0,               # clip exploding gradients
-        bf16=True,                       # mixed precision on Ampere GPUs (A100)
-        tf32=True,                       # faster fp32 matmuls on A100
-        gradient_checkpointing=True,     # recompute activations in backward -> much less memory
+        max_grad_norm=1.0,  # clip exploding gradients
+        bf16=True,  # mixed precision on Ampere GPUs (A100)
+        tf32=True,  # faster fp32 matmuls on A100
+        gradient_checkpointing=True,  # recompute activations in backward -> much less memory
         logging_steps=10,
-        save_steps=SAVE_STEPS,           # frequent checkpoints: Colab VMs can be reclaimed at any time
-        save_total_limit=2,              # keep only the 2 newest checkpoints on disk
+        save_steps=SAVE_STEPS,  # frequent checkpoints: Colab VMs can be reclaimed at any time
+        save_total_limit=2,  # keep only the 2 newest checkpoints on disk
         dataloader_num_workers=2,
-        remove_unused_columns=False,     # we pass our own columns; don't let Trainer drop them
+        remove_unused_columns=False,  # we pass our own columns; don't let Trainer drop them
         report_to="none",
         seed=SEED,
     )

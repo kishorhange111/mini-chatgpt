@@ -9,16 +9,25 @@
 #
 # Tasks: knowledge (MMLU), reasoning/commonsense (ARC-Easy, ARC-Challenge, HellaSwag, Winogrande)
 # and instruction following (IFEval). Chat models are prompted with their chat template.
-set -u
+#
+# Usage:  bash eval.sh               # all four models
+#         ONLY="sft dpo" bash eval.sh  # a subset
+set -u                       # fail on undefined variables
 OUT=/content/eval
 mkdir -p $OUT
 pip install -q "lm_eval[ifeval]" 2>&1 | tail -1
+# Multiple-choice tasks: scored by comparing log-likelihoods of the answer options (no generation).
 MC="mmlu,arc_easy,arc_challenge,hellaswag,winogrande"
-run() {  # name path chat
+
+# run NAME PATH CHAT - evaluate one model. CHAT=1 wraps prompts in the model's chat template,
+# which is how a chat model is actually used; the base model has no template, so CHAT=0.
+run() {
   name=$1; path=$2; chat=$3
   extra=""; [ "$chat" = 1 ] && extra="--apply_chat_template"
   lm_eval --model hf --model_args pretrained=$path,dtype=bfloat16 --tasks $MC --batch_size auto \
           --output_path $OUT/$name --log_samples > $OUT/$name.mc.log 2>&1
+  # IFEval is generative (the model writes an answer that is checked against rules), so it gets
+  # its own call with a fixed batch size and a generation length cap.
   lm_eval --model hf --model_args pretrained=$path,dtype=bfloat16 --tasks ifeval --batch_size 32 \
           $extra --gen_kwargs max_gen_toks=512 --output_path $OUT/$name > $OUT/$name.ifeval.log 2>&1
   echo "$(date -u +%T) evaluated $name"
@@ -31,18 +40,8 @@ for m in ${ONLY:-base sft dpo reference}; do
     reference) run reference Qwen/Qwen2.5-0.5B-Instruct 1 ;;
   esac
 done
-python - <<'EOF'
-import glob, json, os
-rows = {}
-for name in ["base", "sft", "dpo", "reference"]:
-    res = {}
-    for f in glob.glob(f"/content/eval/{name}/**/results_*.json", recursive=True):
-        for task, m in json.load(open(f))["results"].items():
-            for k, v in m.items():
-                if isinstance(v, float) and "stderr" not in k and (k.startswith("acc") or "strict" in k):
-                    res[f"{task}/{k.split(',')[0]}"] = v
-    rows[name] = res
-json.dump(rows, open("/content/eval/summary.json", "w"), indent=2)
-print(json.dumps(rows, indent=2))
-EOF
+# Merge every results_*.json into $OUT/summary.json (= results/benchmarks.json).
+# The logic lives in mini_chatgpt/eval_summary.py so it is unit-tested.
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+PYTHONPATH="$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}" python -m mini_chatgpt.eval_summary "$OUT"
 echo "EVAL DONE"
