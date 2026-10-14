@@ -2,6 +2,7 @@
 
 Nothing here downloads anything, so the whole suite runs offline on CPU.
 """
+
 from types import SimpleNamespace
 
 import jinja2
@@ -12,8 +13,8 @@ from torch import nn
 from mini_chatgpt.chat_format import CHAT_TEMPLATE, IM_END
 
 PAD_ID = 0
-END_ID = 1          # stands in for the single <|im_end|> token of a real tokenizer
-OFFSET = 10         # character c gets id ord(c) + OFFSET, keeping 0..9 free for specials
+END_ID = 1  # stands in for the single <|im_end|> token of a real tokenizer
+OFFSET = 10  # character c gets id ord(c) + OFFSET, keeping 0..9 free for specials
 VOCAB = 256 + OFFSET
 
 

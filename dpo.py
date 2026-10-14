@@ -35,6 +35,7 @@ METRICS we track (on held-out pairs):
 Data: UltraFeedback (binarized) - ~60k prompts, each with a GPT-4-rated
       chosen and rejected answer.
 """
+
 import json
 import os
 import random
@@ -51,13 +52,13 @@ from mini_chatgpt import dpo_core
 # ---------------------------------------------------------------------------
 SFT_PATH = os.environ.get("SFT_PATH", "/content/out/final")
 OUT = os.environ.get("DPO_OUT", "/content/dpo")
-N_TRAIN = int(os.environ.get("N_TRAIN", "12000"))       # preference pairs to train on
+N_TRAIN = int(os.environ.get("N_TRAIN", "12000"))  # preference pairs to train on
 N_EVAL = int(os.environ.get("N_EVAL", "500"))
 BETA = float(os.environ.get("BETA", "0.1"))
-LR = float(os.environ.get("LR", "1e-6"))                  # DPO needs a MUCH smaller LR than SFT
-MICRO_BATCH = int(os.environ.get("MICRO_BATCH", "4"))     # pairs per forward pass
-GRAD_ACCUM = int(os.environ.get("GRAD_ACCUM", "8"))       # effective batch = 32 pairs
-MAX_PROMPT, MAX_LEN = 512, 1024                           # token caps for the prompt and prompt + answer
+LR = float(os.environ.get("LR", "1e-6"))  # DPO needs a MUCH smaller LR than SFT
+MICRO_BATCH = int(os.environ.get("MICRO_BATCH", "4"))  # pairs per forward pass
+GRAD_ACCUM = int(os.environ.get("GRAD_ACCUM", "8"))  # effective batch = 32 pairs
+MAX_PROMPT, MAX_LEN = 512, 1024  # token caps for the prompt and prompt + answer
 TIME_BUDGET_HOURS = float(os.environ.get("TIME_BUDGET_HOURS", "1.0"))
 SEED = 42
 
@@ -117,7 +118,7 @@ def evaluate(policy, ref, data):
     policy.eval()  # no dropout while measuring
     acc, margin, count = 0.0, 0.0, 0
     for i in range(0, len(data), MICRO_BATCH):
-        _, rc, rr = dpo_loss(policy, ref, collate(data[i:i + MICRO_BATCH]))
+        _, rc, rr = dpo_loss(policy, ref, collate(data[i : i + MICRO_BATCH]))
         acc += (rc > rr).float().sum().item()
         margin += (rc - rr).sum().item()
         count += len(rc)
@@ -143,9 +144,8 @@ def generate(model, prompts):
         # transformers v5: apply_chat_template(tokenize=True) returns a dict, so format text first, then tokenize.
         text = tok.apply_chat_template([{"role": "user", "content": p}], add_generation_prompt=True, tokenize=False)
         ids = tok(text, return_tensors="pt", add_special_tokens=False)["input_ids"].to(device)
-        g = model.generate(ids, max_new_tokens=250, do_sample=False, eos_token_id=END,
-                           repetition_penalty=1.1)
-        out[p] = tok.decode(g[0][ids.shape[1]:], skip_special_tokens=True)
+        g = model.generate(ids, max_new_tokens=250, do_sample=False, eos_token_id=END, repetition_penalty=1.1)
+        out[p] = tok.decode(g[0][ids.shape[1] :], skip_special_tokens=True)
     return out
 
 
@@ -172,9 +172,11 @@ def main():
     ref.requires_grad_(False)
 
     # 3) Baselines before any DPO step: sample answers and preference metrics.
-    prompts = ["Explain the difference between a list and a tuple in Python.",
-               "Give me three tips for a job interview.",
-               "What should I do if I feel stressed at work?"]
+    prompts = [
+        "Explain the difference between a list and a tuple in Python.",
+        "Give me three tips for a job interview.",
+        "What should I do if I feel stressed at work?",
+    ]
     before = generate(ref, prompts)
     # policy == ref here, so every reward is ~0: accuracy is ~chance and the margin ~0.
     eval_before = evaluate(policy, ref, test)
@@ -192,7 +194,7 @@ def main():
         for micro in range(GRAD_ACCUM):
             i = (step * GRAD_ACCUM + micro) * MICRO_BATCH
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                loss, rc, rr = dpo_loss(policy, ref, collate(train[i:i + MICRO_BATCH]))
+                loss, rc, rr = dpo_loss(policy, ref, collate(train[i : i + MICRO_BATCH]))
             # Divide so the accumulated gradient is the mean over the effective batch, not the sum.
             (loss / GRAD_ACCUM).backward()
             stats.append((loss.item(), (rc > rr).float().mean().item(), (rc - rr).mean().item()))
@@ -200,9 +202,12 @@ def main():
         opt.step()
         sched.step()
         opt.zero_grad(set_to_none=True)
-        row = {"step": step + 1, "loss": sum(s[0] for s in stats) / len(stats),
-               "reward_accuracy": sum(s[1] for s in stats) / len(stats),
-               "reward_margin": sum(s[2] for s in stats) / len(stats)}
+        row = {
+            "step": step + 1,
+            "loss": sum(s[0] for s in stats) / len(stats),
+            "reward_accuracy": sum(s[1] for s in stats) / len(stats),
+            "reward_margin": sum(s[2] for s in stats) / len(stats),
+        }
         log.append(row)
         if (step + 1) % 10 == 0:
             print(json.dumps(row), f"elapsed {(time.time() - start) / 60:.1f} min", flush=True)
@@ -224,9 +229,15 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     policy.to(torch.bfloat16).save_pretrained(os.path.join(OUT, "final"))
     tok.save_pretrained(os.path.join(OUT, "final"))
-    summary = {"train_pairs": len(train), "steps": len(log), "beta": BETA, "lr": LR,
-               "eval_before": eval_before, "eval_after": eval_after,
-               "wall_clock_hours": round((time.time() - start) / 3600, 2)}
+    summary = {
+        "train_pairs": len(train),
+        "steps": len(log),
+        "beta": BETA,
+        "lr": LR,
+        "eval_before": eval_before,
+        "eval_after": eval_after,
+        "wall_clock_hours": round((time.time() - start) / 3600, 2),
+    }
     json.dump(summary, open(os.path.join(OUT, "dpo_summary.json"), "w"), indent=2)
     json.dump(log, open(os.path.join(OUT, "dpo_log.json"), "w"))
     json.dump({"sft": before, "dpo": after}, open(os.path.join(OUT, "sft_vs_dpo_samples.json"), "w"), indent=2)

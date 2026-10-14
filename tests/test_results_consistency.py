@@ -3,6 +3,7 @@
 This guards against the README drifting from the data (a typo, or a re-run
 whose numbers were not copied over).
 """
+
 import json
 import re
 from pathlib import Path

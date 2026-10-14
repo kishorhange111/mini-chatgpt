@@ -16,6 +16,7 @@ twists that this module implements:
 All functions are pure: they take the tokenizer or pad id as an argument, so
 they can be tested with a tiny fake tokenizer and no downloads.
 """
+
 import random
 
 import torch
@@ -104,8 +105,8 @@ def bucket_by_length(lengths, batch_size, bucket_batches=64, seed=42):
     chunk = batch_size * bucket_batches
     batches = []
     for i in range(0, len(idx), chunk):
-        part = sorted(idx[i:i + chunk], key=lambda j: lengths[j])
-        batches += [part[k:k + batch_size] for k in range(0, len(part), batch_size)]
+        part = sorted(idx[i : i + chunk], key=lambda j: lengths[j])
+        batches += [part[k : k + batch_size] for k in range(0, len(part), batch_size)]
     rng.shuffle(batches)
     return [j for b in batches for j in b]
 
@@ -126,8 +127,8 @@ def collate_sft(batch, pad_token_id):
     for b in batch:
         pad = width - len(b["input_ids"])
         ids.append(b["input_ids"] + [pad_token_id] * pad)
-        labels.append(b["labels"] + [IGNORE_INDEX] * pad)          # padding never counts in the loss
-        mask.append([1] * len(b["input_ids"]) + [0] * pad)          # 0 = "don't attend to this position"
+        labels.append(b["labels"] + [IGNORE_INDEX] * pad)  # padding never counts in the loss
+        mask.append([1] * len(b["input_ids"]) + [0] * pad)  # 0 = "don't attend to this position"
     return {
         "input_ids": torch.tensor(ids),
         "labels": torch.tensor(labels),

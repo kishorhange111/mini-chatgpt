@@ -14,6 +14,7 @@ can be imported and tested on a laptop CPU without downloading anything:
 Every function takes the tokenizer (or model) as an argument instead of using
 a global, which is what makes it possible to test with tiny fakes.
 """
+
 from .chat_format import CHAT_TEMPLATE, IGNORE_INDEX, IM_END, IM_START, render_chatml
 from .dpo_core import answer_logprob, collate_pairs, dpo_loss, dpo_loss_from_logprobs, encode_pair
 from .sft_data import bucket_by_length, collate_sft, encode_conversation, has_target

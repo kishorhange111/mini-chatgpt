@@ -1,4 +1,5 @@
 """DPO: pair encoding, batching, sequence log-probabilities and the loss itself."""
+
 import copy
 import math
 
@@ -111,7 +112,7 @@ def test_loss_is_log2_when_policy_equals_reference():
 
 
 def test_loss_matches_formula():
-    pi = torch.tensor([-1.0, -6.0])        # chosen, rejected
+    pi = torch.tensor([-1.0, -6.0])  # chosen, rejected
     pi_ref = torch.tensor([-2.0, -5.0])
     beta = 0.5
     loss, rc, rr = dpo_loss_from_logprobs(pi, pi_ref, beta)
@@ -124,8 +125,8 @@ def test_loss_falls_as_chosen_becomes_more_likely():
     pi = torch.tensor([-3.0, -3.0], requires_grad=True)
     loss, _, _ = dpo_loss_from_logprobs(pi, torch.tensor([-3.0, -3.0]), beta=0.1)
     loss.backward()
-    assert pi.grad[0] < 0   # gradient descent raises log pi(chosen)
-    assert pi.grad[1] > 0   # ... and lowers log pi(rejected)
+    assert pi.grad[0] < 0  # gradient descent raises log pi(chosen)
+    assert pi.grad[1] > 0  # ... and lowers log pi(rejected)
 
 
 def test_rewards_are_detached():

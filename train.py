@@ -47,6 +47,7 @@ Usage:
     python train.py                               # defaults below
     set -a; . configs/full.env; set +a; python train.py   # the full run
 """
+
 import json
 import os
 import time
@@ -69,16 +70,16 @@ from mini_chatgpt.sft_data import bucket_by_length, collate_sft, encode_conversa
 # ---------------------------------------------------------------------------
 # Configuration (override any of these with environment variables)
 # ---------------------------------------------------------------------------
-MODEL = os.environ.get("MODEL", "Qwen/Qwen2.5-0.5B")            # base model (NOT the instruct one)
-DATASET = os.environ.get("DATASET", "HuggingFaceTB/smoltalk")    # ~1M synthetic + curated chats
+MODEL = os.environ.get("MODEL", "Qwen/Qwen2.5-0.5B")  # base model (NOT the instruct one)
+DATASET = os.environ.get("DATASET", "HuggingFaceTB/smoltalk")  # ~1M synthetic + curated chats
 DATASET_CONFIG = os.environ.get("DATASET_CONFIG", "all")
-N_SAMPLES = int(os.environ.get("N_SAMPLES", "150000"))           # how many conversations to train on
-MAX_LEN = int(os.environ.get("MAX_LEN", "2048"))                 # truncate longer conversations (tokens)
-MAX_STEPS = int(os.environ.get("MAX_STEPS", "-1"))               # -1 = one full pass over the data
+N_SAMPLES = int(os.environ.get("N_SAMPLES", "150000"))  # how many conversations to train on
+MAX_LEN = int(os.environ.get("MAX_LEN", "2048"))  # truncate longer conversations (tokens)
+MAX_STEPS = int(os.environ.get("MAX_STEPS", "-1"))  # -1 = one full pass over the data
 TIME_BUDGET_HOURS = float(os.environ.get("TIME_BUDGET_HOURS", "3.0"))
-LR = float(os.environ.get("LR", "3e-5"))                         # small LR: we only nudge a trained model
-BATCH = int(os.environ.get("BATCH", "4"))                        # conversations per GPU step
-GRAD_ACCUM = int(os.environ.get("GRAD_ACCUM", "8"))              # effective batch = BATCH * GRAD_ACCUM = 32
+LR = float(os.environ.get("LR", "3e-5"))  # small LR: we only nudge a trained model
+BATCH = int(os.environ.get("BATCH", "4"))  # conversations per GPU step
+GRAD_ACCUM = int(os.environ.get("GRAD_ACCUM", "8"))  # effective batch = BATCH * GRAD_ACCUM = 32
 OUT = os.environ.get("OUT", "/content/out")
 SAVE_STEPS = int(os.environ.get("SAVE_STEPS", "300"))
 SEED = 42
@@ -197,18 +198,18 @@ def main():
         per_device_train_batch_size=BATCH,
         gradient_accumulation_steps=GRAD_ACCUM,
         learning_rate=LR,
-        lr_scheduler_type="cosine",      # LR warms up, then smoothly decays to 0
-        warmup_steps=0.03,               # first 3% of steps are warm-up (float = ratio in transformers v5)
+        lr_scheduler_type="cosine",  # LR warms up, then smoothly decays to 0
+        warmup_steps=0.03,  # first 3% of steps are warm-up (float = ratio in transformers v5)
         weight_decay=0.0,
-        max_grad_norm=1.0,               # clip exploding gradients
-        bf16=True,                       # mixed precision on Ampere GPUs (A100)
-        tf32=True,                       # faster fp32 matmuls on A100
-        gradient_checkpointing=True,     # recompute activations in backward -> much less memory
+        max_grad_norm=1.0,  # clip exploding gradients
+        bf16=True,  # mixed precision on Ampere GPUs (A100)
+        tf32=True,  # faster fp32 matmuls on A100
+        gradient_checkpointing=True,  # recompute activations in backward -> much less memory
         logging_steps=10,
-        save_steps=SAVE_STEPS,           # frequent checkpoints: Colab VMs can be reclaimed at any time
-        save_total_limit=2,              # keep only the 2 newest checkpoints on disk
+        save_steps=SAVE_STEPS,  # frequent checkpoints: Colab VMs can be reclaimed at any time
+        save_total_limit=2,  # keep only the 2 newest checkpoints on disk
         dataloader_num_workers=2,
-        remove_unused_columns=False,     # we pass our own columns; don't let Trainer drop them
+        remove_unused_columns=False,  # we pass our own columns; don't let Trainer drop them
         report_to="none",
         seed=SEED,
     )

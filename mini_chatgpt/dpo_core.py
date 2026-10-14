@@ -20,6 +20,7 @@ The pieces, in the order dpo.py uses them:
   dpo_loss_from_logprobs the loss above, given the four log-probabilities
   dpo_loss               runs both models on a batch and returns the loss
 """
+
 import torch
 import torch.nn.functional as F
 
@@ -54,7 +55,7 @@ def encode_pair(ex, tokenizer, end_id, max_prompt, max_len):
     out = {"prompt": p_ids}
     for key in ["chosen", "rejected"]:
         ans = tokenizer(ex[key][-1]["content"], add_special_tokens=False)["input_ids"] + [end_id]
-        out[key] = ans[:max_len - len(p_ids)]
+        out[key] = ans[: max_len - len(p_ids)]
     return out
 
 
@@ -83,9 +84,9 @@ def collate_pairs(pairs, pad_token_id):
     att = torch.zeros((len(seqs), width), dtype=torch.long)
     lm = torch.zeros((len(seqs), width))
     for i, (s, m) in enumerate(zip(seqs, masks, strict=True)):
-        ids[i, :len(s)] = torch.tensor(s)
-        att[i, :len(s)] = 1
-        lm[i, :len(m)] = torch.tensor(m, dtype=torch.float)
+        ids[i, : len(s)] = torch.tensor(s)
+        att[i, : len(s)] = 1
+        lm[i, : len(m)] = torch.tensor(m, dtype=torch.float)
     return ids, att, lm
 
 
@@ -129,7 +130,7 @@ def dpo_loss_from_logprobs(pi, pi_ref, beta):
         the reward-accuracy and reward-margin metrics.
     """
     n = pi.shape[0] // 2
-    rewards = beta * (pi - pi_ref)                  # implicit rewards
+    rewards = beta * (pi - pi_ref)  # implicit rewards
     r_chosen, r_rejected = rewards[:n], rewards[n:]
     # logsigmoid is the numerically stable form of log(sigmoid(x)).
     loss = -F.logsigmoid(r_chosen - r_rejected).mean()
@@ -150,6 +151,6 @@ def dpo_loss(policy, ref, batch, beta):
     """
     ids, att, lm = batch
     pi = answer_logprob(policy, ids, att, lm)
-    with torch.no_grad():                           # the reference model is frozen
+    with torch.no_grad():  # the reference model is frozen
         pi_ref = answer_logprob(ref, ids, att, lm)
     return dpo_loss_from_logprobs(pi, pi_ref, beta)

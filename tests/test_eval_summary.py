@@ -1,4 +1,5 @@
 """Collecting lm-evaluation-harness output files into one summary."""
+
 import json
 
 from mini_chatgpt.eval_summary import extract_metrics, main, summarize
@@ -7,8 +8,11 @@ from mini_chatgpt.eval_summary import extract_metrics, main, summarize
 def test_extract_metrics_keeps_headline_scores_only():
     results = {
         "arc_easy": {"alias": "arc_easy", "acc,none": 0.6, "acc_stderr,none": 0.01, "acc_norm,none": 0.58},
-        "ifeval": {"prompt_level_strict_acc,none": 0.24, "prompt_level_loose_acc,none": 0.3,
-                   "inst_level_strict_acc_stderr,none": 0.02},
+        "ifeval": {
+            "prompt_level_strict_acc,none": 0.24,
+            "prompt_level_loose_acc,none": 0.3,
+            "inst_level_strict_acc_stderr,none": 0.02,
+        },
         "mmlu": {"acc,none": 0.47, "samples": 100},
     }
     assert extract_metrics(results) == {

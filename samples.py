@@ -11,16 +11,19 @@ garbage (see "Engineering notes" in the README).
 
 Usage:  python samples.py        (needs a GPU and the outputs of train.py / dpo.py)
 """
+
 import json
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-PROMPTS = ["Explain the difference between a list and a tuple in Python.",
-           "Give me three tips for a job interview.",
-           "What should I do if I feel stressed at work?",
-           "Write a haiku about machine learning.",
-           "My code throws 'KeyError: user_id'. What does that mean and how do I fix it?"]
+PROMPTS = [
+    "Explain the difference between a list and a tuple in Python.",
+    "Give me three tips for a job interview.",
+    "What should I do if I feel stressed at work?",
+    "Write a haiku about machine learning.",
+    "My code throws 'KeyError: user_id'. What does that mean and how do I fix it?",
+]
 MODELS = [("sft", "/content/out/final"), ("dpo", "/content/dpo/final")]
 
 
@@ -36,15 +39,15 @@ def main():
         out[name] = {}
         for p in PROMPTS:
             # Format as a one-turn chat ending in "<|im_start|>assistant\n", then tokenize the text.
-            text = tok.apply_chat_template([{"role": "user", "content": p}], add_generation_prompt=True,
-                                           tokenize=False)
+            text = tok.apply_chat_template([{"role": "user", "content": p}], add_generation_prompt=True, tokenize=False)
             ids = tok(text, return_tensors="pt", add_special_tokens=False)["input_ids"].to("cuda")
             with torch.no_grad():
                 # repetition_penalty: small models tend to loop on greedy decoding without it.
-                g = model.generate(ids, max_new_tokens=300, do_sample=False, eos_token_id=end,
-                                   repetition_penalty=1.1, use_cache=True)
+                g = model.generate(
+                    ids, max_new_tokens=300, do_sample=False, eos_token_id=end, repetition_penalty=1.1, use_cache=True
+                )
             # Decode only the newly generated tokens, not the prompt.
-            out[name][p] = tok.decode(g[0][ids.shape[1]:], skip_special_tokens=True)
+            out[name][p] = tok.decode(g[0][ids.shape[1] :], skip_special_tokens=True)
     with open("/content/dpo/sft_vs_dpo_samples.json", "w") as f:
         json.dump(out, f, indent=2)
     for p in PROMPTS:

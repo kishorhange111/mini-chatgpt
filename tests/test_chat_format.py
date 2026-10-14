@@ -1,4 +1,5 @@
 """The Jinja chat template and the pure-Python renderer must produce identical ChatML."""
+
 import pytest
 
 from mini_chatgpt.chat_format import IM_END, IM_START, render_chatml

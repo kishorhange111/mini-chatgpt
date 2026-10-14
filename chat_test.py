@@ -6,6 +6,7 @@ closer to how a chat app would run the model; answers change from run to run.
 
 Usage:  python chat_test.py      (runs on the GPU VM, after train.py)
 """
+
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -32,12 +33,12 @@ def main():
             ids,
             max_new_tokens=300,
             do_sample=True,
-            temperature=0.7,     # < 1 sharpens the distribution: fewer odd word choices
-            top_p=0.9,           # nucleus sampling: ignore the long tail of unlikely tokens
+            temperature=0.7,  # < 1 sharpens the distribution: fewer odd word choices
+            top_p=0.9,  # nucleus sampling: ignore the long tail of unlikely tokens
             eos_token_id=tok.convert_tokens_to_ids("<|im_end|>"),  # stop at end of the assistant turn
         )
         # out[0] holds prompt + answer; slice off the prompt before decoding.
-        print(f"### USER: {p}\n### ASSISTANT: {tok.decode(out[0][ids.shape[1]:], skip_special_tokens=True)}\n")
+        print(f"### USER: {p}\n### ASSISTANT: {tok.decode(out[0][ids.shape[1] :], skip_special_tokens=True)}\n")
 
 
 if __name__ == "__main__":

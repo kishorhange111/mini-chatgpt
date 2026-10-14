@@ -1,4 +1,5 @@
 """SFT data preparation: loss masking, truncation, length bucketing and padding."""
+
 import torch
 import torch.nn.functional as F
 
@@ -81,7 +82,7 @@ def test_bucketing_reduces_padding():
         """Total padding tokens if batches are taken consecutively from `order`."""
         total = 0
         for i in range(0, len(order), batch):
-            group = [lengths[j] for j in order[i:i + batch]]
+            group = [lengths[j] for j in order[i : i + batch]]
             total += max(group) * len(group) - sum(group)
         return total
 
@@ -94,7 +95,7 @@ def test_bucketing_reduces_padding():
 def test_bucketing_still_shuffles_batch_order():
     lengths = list(range(4096))
     order = bucket_by_length(lengths, batch_size=8)
-    batch_max = [max(lengths[j] for j in order[i:i + 8]) for i in range(0, len(order), 8)]
+    batch_max = [max(lengths[j] for j in order[i : i + 8]) for i in range(0, len(order), 8)]
     assert batch_max != sorted(batch_max)  # not one long short-to-long curriculum
 
 
@@ -120,22 +121,22 @@ def test_masked_positions_do_not_affect_the_loss(tok, conversation):
     # End to end: build a batch, compute cross-entropy the way a causal LM does,
     # and check that changing the logits at user/padding positions changes nothing.
     enc = encode_conversation(conversation, tok, max_len=10_000)
-    short = encode_conversation([{"role": "user", "content": "x"}, {"role": "assistant", "content": "y"}],
-                                tok, max_len=10_000)
+    short = encode_conversation(
+        [{"role": "user", "content": "x"}, {"role": "assistant", "content": "y"}], tok, max_len=10_000
+    )
     batch = collate_sft([enc, short], pad_token_id=PAD_ID)
     labels = batch["labels"]
     vocab = 300
 
     def loss(logits):
         # Causal LM convention: logits at position t predict label t+1.
-        return F.cross_entropy(logits[:, :-1].reshape(-1, vocab), labels[:, 1:].reshape(-1),
-                               ignore_index=IGNORE_INDEX)
+        return F.cross_entropy(logits[:, :-1].reshape(-1, vocab), labels[:, 1:].reshape(-1), ignore_index=IGNORE_INDEX)
 
     torch.manual_seed(0)
     logits = torch.randn(*labels.shape, vocab)
     base = loss(logits)
 
-    ignored = (labels[:, 1:] == IGNORE_INDEX)                 # predictions the loss should skip
+    ignored = labels[:, 1:] == IGNORE_INDEX  # predictions the loss should skip
     noisy = logits.clone()
     noisy[:, :-1][ignored] += 100 * torch.randn(int(ignored.sum()), vocab)
     assert torch.allclose(loss(noisy), base)
