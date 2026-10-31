@@ -12,7 +12,7 @@ In words: raise the probability of the chosen answer and lower the rejected
 one, *relative to where the SFT model started*. Measuring against pi_ref is
 what stops the model drifting into nonsense; beta sets how far it may drift.
 
-The pieces, in the order dpo.py uses them:
+The pieces, in the order scripts/train_dpo.py uses them:
 
   encode_pair            prompt/chosen/rejected text -> token ids
   collate_pairs          pad a micro-batch: all chosen rows, then all rejected

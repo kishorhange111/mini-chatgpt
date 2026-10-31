@@ -1,10 +1,10 @@
 """
 Quick manual check of the SFT model: ask it a few questions and print the answers.
 
-Unlike samples.py this uses *sampling* (temperature 0.7, top-p 0.9), which is
+Unlike scripts/generate_samples.py this uses *sampling* (temperature 0.7, top-p 0.9), which is
 closer to how a chat app would run the model; answers change from run to run.
 
-Usage:  python chat_test.py      (runs on the GPU VM, after train.py)
+Usage:  python scripts/chat.py      (runs on the GPU VM, after scripts/train_sft.py)
 """
 
 import torch

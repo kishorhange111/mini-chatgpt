@@ -53,7 +53,7 @@ def test_encode_pair_caps_total_length(tok):
 
 def test_encode_pair_can_truncate_answer_to_empty(tok):
     out = encode_pair(make_example(), tok, END_ID, max_prompt=20, max_len=20)
-    assert out["chosen"] == [] and out["rejected"] == []  # dpo.py drops such pairs
+    assert out["chosen"] == [] and out["rejected"] == []  # scripts/train_dpo.py drops such pairs
 
 
 # --- collate_pairs ----------------------------------------------------------

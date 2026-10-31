@@ -29,7 +29,7 @@ def write_results(path, results):
 
 
 def test_summarize_merges_nested_result_files(tmp_path):
-    # eval.sh writes multiple-choice and IFEval runs as separate files under each model folder.
+    # scripts/evaluate.sh writes multiple-choice and IFEval runs as separate files under each model folder.
     write_results(tmp_path / "sft" / "x" / "results_1.json", {"mmlu": {"acc,none": 0.45}})
     write_results(tmp_path / "sft" / "y" / "results_2.json", {"ifeval": {"inst_level_strict_acc,none": 0.36}})
     write_results(tmp_path / "base" / "results_3.json", {"mmlu": {"acc,none": 0.47}})

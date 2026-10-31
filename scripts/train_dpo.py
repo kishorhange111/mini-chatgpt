@@ -71,7 +71,7 @@ END = tok.convert_tokens_to_ids("<|im_end|>")
 
 
 # ---------------------------------------------------------------------------
-# Data and loss (logic in mini_chatgpt/dpo_core.py, unit-tested there; these
+# Data and loss (logic in src/mini_chatgpt/dpo_core.py, unit-tested there; these
 # wrappers bind it to this run's tokenizer, device and hyper-parameters)
 # ---------------------------------------------------------------------------
 def encode_pair(ex):

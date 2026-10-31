@@ -1,7 +1,7 @@
 """
 Collect lm-evaluation-harness results into one summary file.
 
-eval.sh runs lm-evaluation-harness once per model and task group; each run
+scripts/evaluate.sh runs lm-evaluation-harness once per model and task group; each run
 writes a results_<timestamp>.json somewhere under <eval_dir>/<model_name>/.
 This module walks those files and keeps only the headline numbers (accuracy
 and IFEval "strict" scores, no standard errors), producing
@@ -10,7 +10,7 @@ and IFEval "strict" scores, no standard errors), producing
 
 which is what results/benchmarks.json contains.
 
-Usage (called by eval.sh):
+Usage (called by scripts/evaluate.sh):
     python -m mini_chatgpt.eval_summary [EVAL_DIR]      # default /content/eval
 """
 
@@ -46,7 +46,7 @@ def summarize(eval_dir, names=MODEL_NAMES):
     """Merge every results_*.json under eval_dir/<name>/ for each model name.
 
     Args:
-        eval_dir: the folder eval.sh wrote to.
+        eval_dir: the folder scripts/evaluate.sh wrote to.
         names: model sub-folders to read.
 
     Returns:

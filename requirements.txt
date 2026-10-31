@@ -1,7 +1,9 @@
-# Runtime stack for the GPU scripts (train.py, dpo.py, samples.py, chat_test.py, eval.sh).
+# Runtime stack for the GPU scripts in scripts/ (SFT, DPO, evaluation, samples, chat).
 # transformers v5 is required: the scripts use its `dtype=` argument and v5 TrainingArguments.
 torch>=2.4,<3
 transformers>=5.0,<6
 datasets>=3.0,<5
 accelerate>=1.0,<2
 lm_eval[ifeval]>=0.4.5,<0.5
+# This repository itself, so the scripts can `import mini_chatgpt` from any folder.
+-e .

@@ -43,13 +43,13 @@ Every number above is taken from the raw files in [`results/`](results/); a unit
 ## Pipeline
 ```mermaid
 flowchart LR
-    A["Qwen2.5-0.5B<br/>base model"] -->|"train.py<br/>SFT on 160k SmolTalk chats<br/>loss on assistant tokens only"| B["SFT model"]
-    B -->|"dpo.py<br/>DPO on 12k UltraFeedback pairs<br/>frozen SFT copy as reference"| C["SFT + DPO model"]
+    A["Qwen2.5-0.5B<br/>base model"] -->|"scripts/train_sft.py<br/>SFT on 160k SmolTalk chats<br/>loss on assistant tokens only"| B["SFT model"]
+    B -->|"scripts/train_dpo.py<br/>DPO on 12k UltraFeedback pairs<br/>frozen SFT copy as reference"| C["SFT + DPO model"]
     A --> E
     B --> E
     C --> E
     R["Qwen2.5-0.5B-Instruct<br/>(reference)"] --> E
-    E["eval.sh<br/>lm-evaluation-harness<br/>MMLU · ARC · HellaSwag · Winogrande · IFEval"] --> S["results/benchmarks.json"]
+    E["scripts/evaluate.sh<br/>lm-evaluation-harness<br/>MMLU · ARC · HellaSwag · Winogrande · IFEval"] --> S["results/benchmarks.json"]
 ```
 
 | Stage | What happens | Data | Compute |
@@ -69,22 +69,22 @@ flowchart LR
 All SFT vs. DPO answers: [`results/sft_vs_dpo_samples.json`](results/sft_vs_dpo_samples.json).
 
 ## How it works
-### SFT — [`train.py`](train.py), logic in [`mini_chatgpt/sft_data.py`](mini_chatgpt/sft_data.py)
+### SFT — [`scripts/train_sft.py`](scripts/train_sft.py), logic in [`src/mini_chatgpt/sft_data.py`](src/mini_chatgpt/sft_data.py)
 - **ChatML template:** `<|im_start|>user\n…<|im_end|>\n<|im_start|>assistant\n…<|im_end|>` — the model learns where turns start and, crucially, where its answer **ends**.
 - **Loss masking:** user/system tokens get label `-100`; only assistant tokens are learned, so the model does not learn to imitate users.
 - **Length bucketing:** conversations of similar length are batched together (custom sampler) → far less padding waste.
 - bf16 mixed precision, gradient checkpointing, cosine LR with warm-up, effective batch 32, max 2,048 tokens.
 - **Time budget + checkpoints every 300 steps**, so the run is resumable and spend is capped.
 
-### DPO — [`dpo.py`](dpo.py), loss in [`mini_chatgpt/dpo_core.py`](mini_chatgpt/dpo_core.py) (implemented by hand, no TRL)
+### DPO — [`scripts/train_dpo.py`](scripts/train_dpo.py), loss in [`src/mini_chatgpt/dpo_core.py`](src/mini_chatgpt/dpo_core.py) (implemented by hand, no TRL)
 ```
 r(y) = β · [ log π(y|x) − log π_ref(y|x) ]          implicit reward, β = 0.1
 L    = − log σ( r(y_chosen) − r(y_rejected) )         π_ref = frozen copy of the SFT model
 ```
 The same objective as RLHF (maximise reward, stay close to the reference model), optimised directly on preference pairs — no reward model, no PPO. Policy in fp32 with bf16 autocast, reference in bf16, gradient checkpointing, effective batch 32 pairs.
 
-### Evaluation — [`eval.sh`](eval.sh)
-lm-evaluation-harness on four models with identical settings; chat models are prompted through their chat template (`--apply_chat_template`). [`mini_chatgpt/eval_summary.py`](mini_chatgpt/eval_summary.py) merges the per-run result files into `benchmarks.json`.
+### Evaluation — [`scripts/evaluate.sh`](scripts/evaluate.sh)
+lm-evaluation-harness on four models with identical settings; chat models are prompted through their chat template (`--apply_chat_template`). [`src/mini_chatgpt/eval_summary.py`](src/mini_chatgpt/eval_summary.py) merges the per-run result files into `benchmarks.json`.
 
 ## Engineering notes (things that went wrong, and the fixes)
 - **Cloud runtimes disappear.** Training ran on preemptible cloud A100s that were reclaimed several times mid-training. Every run is **resumable** (`get_last_checkpoint`), checkpoints were saved every 300 steps and continuously backed up off the machine, and SFT was resumed from backup twice without losing more than a few hundred steps.
@@ -95,50 +95,53 @@ lm-evaluation-harness on four models with identical settings; chat models are pr
 Training and evaluation need a CUDA GPU (an A100 40 GB was used). Paths default to a Colab-style `/content/...` layout and can be changed through environment variables.
 ```bash
 git clone https://github.com/kishorhange111/mini-chatgpt.git && cd mini-chatgpt
-pip install -r requirements.txt      # torch, transformers v5, datasets, accelerate, lm_eval[ifeval]
-python train.py                      # SFT      (env: N_SAMPLES, TIME_BUDGET_HOURS, ...)
-python dpo.py                        # DPO      (SFT_PATH=/content/out/final)
-bash eval.sh                         # benchmarks for base / SFT / DPO / Qwen-Instruct
-python samples.py                    # side-by-side answers
+pip install -r requirements.txt      # torch, transformers v5, datasets, accelerate, lm_eval[ifeval] + this package
+python scripts/train_sft.py          # SFT      (env: N_SAMPLES, TIME_BUDGET_HOURS, ...)
+python scripts/train_dpo.py          # DPO      (SFT_PATH=/content/out/final)
+bash scripts/evaluate.sh             # benchmarks for base / SFT / DPO / Qwen-Instruct
+python scripts/generate_samples.py   # side-by-side answers
 ```
 The full SFT run used [`configs/full.env`](configs/full.env) (`make train` loads it). Main settings:
 
 | Script | Variable | Default | Meaning |
 |---|---|---|---|
-| `train.py` | `MODEL` | `Qwen/Qwen2.5-0.5B` | base model to fine-tune |
+| `scripts/train_sft.py` | `MODEL` | `Qwen/Qwen2.5-0.5B` | base model to fine-tune |
 | | `N_SAMPLES` / `MAX_LEN` | `150000` / `2048` | conversations used / token cap |
 | | `TIME_BUDGET_HOURS` | `3.0` | save and stop after this long |
 | | `OUT` | `/content/out` | checkpoints + `final/` model |
-| `dpo.py` | `SFT_PATH` | `/content/out/final` | model to align (also the reference) |
+| `scripts/train_dpo.py` | `SFT_PATH` | `/content/out/final` | model to align (also the reference) |
 | | `BETA` / `LR` | `0.1` / `1e-6` | DPO strength / learning rate |
 | | `DPO_OUT` | `/content/dpo` | output folder |
 
 ## Project layout
 ```
 mini-chatgpt/
-├── train.py               # stage 1: SFT (GPU orchestration: load, tokenize, Trainer, save)
-├── dpo.py                 # stage 2: DPO training loop, preference metrics, before/after samples
-├── eval.sh                # stage 3: lm-evaluation-harness on base / SFT / DPO / reference
-├── samples.py             # side-by-side SFT vs DPO answers for the README
-├── chat_test.py           # quick sampled chat with the SFT model
-├── mini_chatgpt/          # pure, unit-tested logic used by the scripts
-│   ├── chat_format.py     #   ChatML template + pure-Python renderer
-│   ├── sft_data.py        #   loss masking, length bucketing, padding
-│   ├── dpo_core.py        #   pair encoding, sequence log-probs, DPO loss
-│   └── eval_summary.py    #   lm-eval result files -> benchmarks.json
-├── tests/                 # pytest suite (CPU only, no downloads)
-├── configs/full.env       # settings of the full SFT run
-├── results/               # raw metrics, logs, plots and sample answers
-├── pyproject.toml         # package metadata, ruff + pytest config
-├── requirements.txt       # GPU runtime stack
-└── requirements-dev.txt   # lint/test tooling
+├── src/mini_chatgpt/          # pure, unit-tested logic used by the scripts (installable package)
+│   ├── chat_format.py         #   ChatML template + pure-Python renderer
+│   ├── sft_data.py            #   loss masking, length bucketing, padding
+│   ├── dpo_core.py            #   pair encoding, sequence log-probs, DPO loss
+│   └── eval_summary.py        #   lm-eval result files -> benchmarks.json
+├── scripts/                   # GPU entry points, one per pipeline stage
+│   ├── train_sft.py           #   stage 1: SFT (load, tokenize, Trainer, save)
+│   ├── train_dpo.py           #   stage 2: DPO training loop, preference metrics, before/after samples
+│   ├── evaluate.sh            #   stage 3: lm-evaluation-harness on base / SFT / DPO / reference
+│   ├── generate_samples.py    #   side-by-side SFT vs DPO answers for the README
+│   └── chat.py                #   quick sampled chat with the SFT model
+├── configs/full.env           # settings of the full SFT run
+├── tests/                     # pytest suite (CPU only, no downloads)
+├── results/                   # raw metrics, logs, plots and sample answers
+├── .github/workflows/ci.yml   # lint + tests on every push and pull request
+├── Makefile                   # make install / lint / test / train / dpo / eval
+├── pyproject.toml             # package metadata, ruff + pytest config
+├── requirements.txt           # GPU runtime stack (installs this package too)
+└── requirements-dev.txt       # lint/test tooling
 ```
 
 ## Testing
 The tests cover the logic where silent bugs would quietly ruin a run: that the token-by-token SFT encoding reproduces the chat template exactly, that only assistant tokens (and their end marker) reach the loss, that length bucketing is a reproducible permutation that removes most padding, that DPO batches and log-probabilities are masked correctly, that the loss matches its formula (and is `log 2` when policy = reference), that a few DPO steps on a toy model learn the preference, and that the README numbers match `results/`. They use a character-level fake tokenizer and a tiny pure-torch model, so they run on CPU in seconds with no network.
 ```bash
-pip install torch -r requirements-dev.txt     # CPU torch is enough
-make check                                    # = ruff check . && pytest
+pip install torch -r requirements-dev.txt -e .  # CPU torch is enough
+make check                                       # = ruff check . && ruff format --check . && pytest
 ```
 CI runs the same on every push and pull request ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
@@ -146,7 +149,7 @@ CI runs the same on every push and pull request ([`.github/workflows/ci.yml`](.g
 - **One run per configuration.** No repeated seeds, so the small SFT → DPO differences (+0.2 – 0.5 pts) are within benchmark noise, as noted above.
 - **Small scale.** A 0.5 B-parameter model and 160k SFT conversations; the recipe is the real one, but absolute quality is far from large chat models.
 - **Light DPO.** 375 steps at LR 1e-6 on 12k pairs: enough to move preference accuracy, not enough to change benchmarks much.
-- **GPU-only scripts.** `train.py`, `dpo.py` and `samples.py` assume CUDA (bf16, A100) and Colab-style default paths.
+- **GPU-only scripts.** `scripts/train_sft.py`, `scripts/train_dpo.py` and `scripts/generate_samples.py` assume CUDA (bf16, A100) and Colab-style default paths.
 - **Weights not committed.** Model weights (~1 GB each) are not in the repository; the scripts regenerate them.
 
 ## Data and license

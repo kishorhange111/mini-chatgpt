@@ -1,8 +1,9 @@
 """
 mini_chatgpt: the pure, unit-tested building blocks of the Mini-ChatGPT pipeline.
 
-The top-level scripts (train.py, dpo.py, eval.sh, samples.py) handle the
-heavy, GPU-bound work: downloading models and datasets and running training.
+The entry-point scripts in scripts/ (train_sft.py, train_dpo.py, evaluate.sh,
+generate_samples.py) handle the heavy, GPU-bound work: downloading models and
+datasets and running training.
 Everything that is *logic* rather than *plumbing* lives in this package so it
 can be imported and tested on a laptop CPU without downloading anything:
 

@@ -40,12 +40,12 @@ All settings are environment variables, so the same script is used for a
 20-step smoke test and for the full run (see configs/*.env).
 
 The pure data logic (loss masking, length bucketing, padding, the chat
-template) lives in the mini_chatgpt/ package, where it is unit-tested on CPU.
+template) lives in the src/mini_chatgpt/ package, where it is unit-tested on CPU.
 This file is the GPU-side orchestration: load, tokenize, train, save.
 
 Usage:
-    python train.py                               # defaults below
-    set -a; . configs/full.env; set +a; python train.py   # the full run
+    python scripts/train_sft.py                               # defaults below
+    set -a; . configs/full.env; set +a; python scripts/train_sft.py   # the full run
 """
 
 import json
@@ -86,7 +86,7 @@ SEED = 42
 
 # The tokenizer is loaded at import time because `encode` and `collate` below
 # use it, and datasets.map(num_proc=...) ships those functions to worker
-# processes. The ChatML template (see mini_chatgpt/chat_format.py) is attached
+# processes. The ChatML template (see src/mini_chatgpt/chat_format.py) is attached
 # here so it is saved with the tokenizer and `apply_chat_template` works later.
 tok = AutoTokenizer.from_pretrained(MODEL)
 tok.chat_template = CHAT_TEMPLATE
@@ -97,7 +97,7 @@ if tok.pad_token is None:
 
 
 # ---------------------------------------------------------------------------
-# Data preparation (the logic lives in mini_chatgpt/sft_data.py, where it is
+# Data preparation (the logic lives in src/mini_chatgpt/sft_data.py, where it is
 # unit-tested; these thin wrappers bind it to this run's tokenizer/settings)
 # ---------------------------------------------------------------------------
 def encode(example):

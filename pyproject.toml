@@ -24,7 +24,7 @@ dev = ["pytest>=8", "ruff>=0.6", "jinja2>=3.1"]
 Repository = "https://github.com/kishorhange111/mini-chatgpt"
 
 [tool.setuptools.packages.find]
-include = ["mini_chatgpt*"]
+where = ["src"]
 
 [tool.ruff]
 line-length = 120
@@ -39,5 +39,5 @@ known-first-party = ["mini_chatgpt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = ["src"]
 addopts = "-q"
