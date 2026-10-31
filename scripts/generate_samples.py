@@ -9,7 +9,7 @@ The model is put in eval mode with the KV cache ON. Generating in training
 mode with gradient checkpointing silently drops the cache and produces
 garbage (see "Engineering notes" in the README).
 
-Usage:  python samples.py        (needs a GPU and the outputs of train.py / dpo.py)
+Usage:  python scripts/generate_samples.py   (needs a GPU and the outputs of train_sft.py / train_dpo.py)
 """
 
 import json

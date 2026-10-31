@@ -10,3 +10,9 @@ checkpoints/
 .ruff_cache/
 *.egg-info/
 .venv/
+build/
+dist/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+.env

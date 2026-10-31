@@ -1,34 +1,41 @@
-.PHONY: install install-dev lint format test check train dpo eval samples clean
+# Common developer commands. Run `make help` to list them.
+.DEFAULT_GOAL := help
+.PHONY: help install install-dev lint format test check train dpo eval samples clean
 
-install:        ## runtime stack for the GPU scripts
+help:           ## list the available commands
+	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
+
+install:        ## GPU runtime stack + this package (editable)
 	pip install -r requirements.txt
 
-install-dev:    ## lint/test tooling (CPU torch is enough)
-	pip install torch -r requirements-dev.txt
+install-dev:    ## lint/test tooling + this package (CPU torch is enough)
+	pip install torch -r requirements-dev.txt -e .
 
-lint:
+lint:           ## ruff lint + format check (what CI runs)
 	ruff check .
+	ruff format --check .
 
-format:
+format:         ## auto-fix lint findings and reformat
 	ruff check --fix .
+	ruff format .
 
-test:
+test:           ## run the unit tests (CPU, no downloads)
 	pytest
 
-check: lint test
+check: lint test ## everything CI runs
 
-train:          ## SFT, full run settings from configs/full.env
-	set -a; . configs/full.env; set +a; python train.py
+train:          ## stage 1: SFT with the full-run settings from configs/full.env
+	set -a; . configs/full.env; set +a; python scripts/train_sft.py
 
-dpo:
-	python dpo.py
+dpo:            ## stage 2: DPO on top of the SFT model
+	python scripts/train_dpo.py
 
-eval:
-	bash eval.sh
+eval:           ## stage 3: lm-evaluation-harness benchmarks
+	bash scripts/evaluate.sh
 
-samples:
-	python samples.py
+samples:        ## side-by-side SFT vs DPO answers
+	python scripts/generate_samples.py
 
-clean:
-	rm -rf .pytest_cache .ruff_cache *.egg-info
+clean:          ## remove caches and build artefacts
+	rm -rf .pytest_cache .ruff_cache build dist src/*.egg-info
 	find . -name __pycache__ -type d -prune -exec rm -rf {} +

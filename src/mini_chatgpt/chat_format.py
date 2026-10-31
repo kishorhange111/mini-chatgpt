@@ -17,8 +17,8 @@ At inference time the prompt ends with an open "<|im_start|>assistant\\n" (the
 Two representations of the same format live here:
 
 * CHAT_TEMPLATE - a Jinja template. It is attached to the tokenizer and saved
-  with the model, so `tokenizer.apply_chat_template(...)` (used by dpo.py,
-  samples.py and lm-evaluation-harness) produces exactly this format.
+  with the model, so `tokenizer.apply_chat_template(...)` (used by scripts/train_dpo.py,
+  scripts/generate_samples.py and lm-evaluation-harness) produces exactly this format.
 * render_chatml - the same thing in plain Python. Tests use it to check that
   the template and the SFT encoder (which builds the format token by token)
   never drift apart.

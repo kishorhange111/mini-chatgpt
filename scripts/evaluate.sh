@@ -10,8 +10,8 @@
 # Tasks: knowledge (MMLU), reasoning/commonsense (ARC-Easy, ARC-Challenge, HellaSwag, Winogrande)
 # and instruction following (IFEval). Chat models are prompted with their chat template.
 #
-# Usage:  bash eval.sh               # all four models
-#         ONLY="sft dpo" bash eval.sh  # a subset
+# Usage:  bash scripts/evaluate.sh               # all four models
+#         ONLY="sft dpo" bash scripts/evaluate.sh  # a subset
 set -u                       # fail on undefined variables
 OUT=/content/eval
 mkdir -p $OUT
@@ -41,7 +41,7 @@ for m in ${ONLY:-base sft dpo reference}; do
   esac
 done
 # Merge every results_*.json into $OUT/summary.json (= results/benchmarks.json).
-# The logic lives in mini_chatgpt/eval_summary.py so it is unit-tested.
-REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
-PYTHONPATH="$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}" python -m mini_chatgpt.eval_summary "$OUT"
+# The logic lives in src/mini_chatgpt/eval_summary.py so it is unit-tested.
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" python -m mini_chatgpt.eval_summary "$OUT"
 echo "EVAL DONE"
