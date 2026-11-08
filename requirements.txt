@@ -3,7 +3,7 @@
 torch>=2.4,<3
 transformers>=5.0,<6
 datasets>=3.0,<5
-accelerate>=1.0,<2
+accelerate>=1.15.0,<2
 lm_eval[ifeval]>=0.4.5,<0.5
 # This repository itself, so the scripts can `import mini_chatgpt` from any folder.
 -e .
